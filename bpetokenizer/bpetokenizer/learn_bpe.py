@@ -20,15 +20,6 @@ import copy
 import argparse
 from collections import defaultdict, Counter
 
-# hack for python2/3 compatibility
-from io import open
-argparse.open = open
-
-# python 2/3 compatibility
-if sys.version_info < (3, 0):
-  sys.stderr = codecs.getwriter('UTF-8')(sys.stderr)
-  sys.stdout = codecs.getwriter('UTF-8')(sys.stdout)
-  sys.stdin = codecs.getreader('UTF-8')(sys.stdin)
 
 def create_parser():
     parser = argparse.ArgumentParser(
@@ -60,7 +51,7 @@ def get_vocabulary(fobj):
     """
     vocab = Counter()
     for line in fobj:
-        for word in line.split():
+        for word in line:
             vocab[word] += 1
     return vocab
 
@@ -174,12 +165,10 @@ def prune_stats(stats, big_stats, threshold):
             else:
                 big_stats[item] = freq
 
-if __name__ == '__main__':
+def learn_bpe(text, num_symbols=10000, min_frequency=2, verbose=False):
+    bpe = []
 
-    parser = create_parser()
-    args = parser.parse_args()
-
-    vocab = get_vocabulary(args.input)
+    vocab = get_vocabulary(text)
     vocab = dict([(tuple(x)+('</w>',) ,y) for (x,y) in vocab.items()])
     sorted_vocab = sorted(vocab.items(), key=lambda x: x[1], reverse=True)
 
@@ -187,7 +176,7 @@ if __name__ == '__main__':
     big_stats = copy.deepcopy(stats)
     # threshold is inspired by Zipfian assumption, but should only affect speed
     threshold = max(stats.values()) / 10
-    for i in range(args.symbols):
+    for i in xrange(num_symbols):
         if stats:
             most_frequent = max(stats, key=stats.get)
 
@@ -200,15 +189,31 @@ if __name__ == '__main__':
             threshold = stats[most_frequent] * i/(i+10000.0)
             prune_stats(stats, big_stats, threshold)
 
-        if stats[most_frequent] < args.min_frequency:
-            sys.stderr.write('no pair has frequency >= {0}. Stopping\n'.format(args.min_frequency))
+        if stats[most_frequent] < min_frequency:
+            sys.stderr.write('no pair has frequency >= {0}. All done\n'.format(min_frequency))
             break
 
-        if args.verbose:
+        if verbose:
             sys.stderr.write('pair {0}: {1} {2} -> {1}{2} (frequency {3})\n'.format(i, most_frequent[0], most_frequent[1], stats[most_frequent]))
-        args.output.write('{0} {1}\n'.format(*most_frequent))
+        bpe.append(most_frequent)
         changes = replace_pair(most_frequent, sorted_vocab, indices)
         update_pair_statistics(most_frequent, changes, stats, indices)
         stats[most_frequent] = 0
         if not i % 100:
             prune_stats(stats, big_stats, threshold)
+    return bpe
+
+if __name__ == "__main__":
+    # hack for python2/3 compatibility
+    from io import open
+    argparse.open = open
+
+    # python 2/3 compatibility
+    if sys.version_info < (3, 0):
+      sys.stderr = codecs.getwriter('UTF-8')(sys.stderr)
+      sys.stdout = codecs.getwriter('UTF-8')(sys.stdout)
+      sys.stdin = codecs.getreader('UTF-8')(sys.stdin)
+
+    ap = create_parser()
+    args = ap.parse_args()
+    print learn_bpe([line for line in args.input])

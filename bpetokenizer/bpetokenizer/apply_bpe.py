@@ -18,42 +18,40 @@ import codecs
 import argparse
 from collections import defaultdict
 
-# hack for python2/3 compatibility
-from io import open
-argparse.open = open
-
-# python 2/3 compatibility
-if sys.version_info < (3, 0):
-  sys.stderr = codecs.getwriter('UTF-8')(sys.stderr)
-  sys.stdout = codecs.getwriter('UTF-8')(sys.stdout)
-  sys.stdin = codecs.getreader('UTF-8')(sys.stdin)
-
 import codecs
+
+from .learn_bpe import learn_bpe
 
 class BPE(object):
 
-    def __init__(self, codes, separator='@@'):            
-        
-        with codecs.open(codes.name, encoding='utf-8') as codes:
-            self.bpe_codes = [tuple(item.split()) for item in codes]
-         
-        # some hacking to deal with duplicates (only consider first instance)
-        self.bpe_codes = dict([(code,i) for (i,code) in reversed(list(enumerate(self.bpe_codes)))])
+    def __init__(self, bpe_codes = None, separator='@@'):            
+        self.bpe_codes = bpe_codes
+        if self.bpe_codes is not None:
+            # some hacking to deal with duplicates (only consider first instance)
+            self.bpe_codes = dict([(code,i) for (i,code) in reversed(list(enumerate(self.bpe_codes)))])
 
         self.separator = separator
 
-    def segment(self, sentence):
-        """segment single sentence (whitespace-tokenized string) with BPE encoding"""
+    def fit(self, sentences, num_symbols=10000, min_frequency=2, verbose=False):
+        self.bpe_codes = learn_bpe(sentences, num_symbols, min_frequency, verbose)
+
+        # some hacking to deal with duplicates (only consider first instance)
+        self.bpe_codes = dict([(code,i) for (i,code) in reversed(list(enumerate(self.bpe_codes)))])
+
+    def transform(self, sentences):
+        """segment single a list of tokenized sentences with BPE encoding"""
 
         output = []
-        for word in sentence.split():
-            new_word = encode(word, self.bpe_codes)
+        for sentence in sentences:
+            output_sent = []
+            for word in sentence:
+                new_word = encode(word, self.bpe_codes)
 
-            for item in new_word[:-1]:
-                output.append(item + self.separator)
-            output.append(new_word[-1])
-
-        return ' '.join(output)
+                for item in new_word[:-1]:
+                    output_sent.append(item + self.separator)
+                output_sent.append(new_word[-1])
+            output.append(output_sent)
+        return output
 
 def create_parser():
     parser = argparse.ArgumentParser(
@@ -66,7 +64,6 @@ def create_parser():
         help="Input file (default: standard input).")
     parser.add_argument(
         '--codes', '-c', type=argparse.FileType('r'), metavar='PATH',
-        required=True,
         help="File with BPE codes (created by learn_bpe.py).")
     parser.add_argument(
         '--output', '-o', type=argparse.FileType('w'), default=sys.stdout,
@@ -138,13 +135,22 @@ def encode(orig, bpe_codes, cache={}):
     cache[orig] = word
     return word
 
-
 if __name__ == '__main__':
+    # hack for python2/3 compatibility
+    from io import open
+    argparse.open = open
+
+    # python 2/3 compatibility
+    if sys.version_info < (3, 0):
+      sys.stderr = codecs.getwriter('UTF-8')(sys.stderr)
+      sys.stdout = codecs.getwriter('UTF-8')(sys.stdout)
+      sys.stdin = codecs.getreader('UTF-8')(sys.stdin)
+
     parser = create_parser()
     args = parser.parse_args()
 
-    bpe = BPE(args.codes, args.separator)
+    text = [line.split() for line in args.input]
 
-    for line in args.input:
-        args.output.write(bpe.segment(line).strip())
-        args.output.write('\n')
+    bpe = BPE()
+    bpe.fit(text)
+    print bpe.transform(text)
